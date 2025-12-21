@@ -24,39 +24,45 @@ def masks_to_boxes(mask):
     return boxes, labels
 
 class VODDataset(Dataset):
-    def __init__(self, video_name, frames= (0,5)):
+    def __init__(self, video_names, frames= (0,5)):
         super().__init__()
-        self.video_name = video_name
+        self.video_names = video_names
         self.init_frame = frames[0]
         self.final_frame = frames[1]
         
-        frames_vid_1 = []
-        # add one more loop for each video
-        parent_path = f"JPEGImages/{self.video_name}"
-        for f in os.listdir(parent_path):
-            frame = cv2.imread(f"{parent_path}/{f}")
-            frames_vid_1.append(frame)
+        # frames_vid_1 = []
+        # # add one more loop for each video
+        # for video in self.video_names:
+        #     parent_path = f"JPEGImages/{video}"
+        #     for f in os.listdir(parent_path):
+        #         frame = cv2.imread(f"{parent_path}/{f}")
+        #         frames_vid_1.append(frame)
             
         self.annotations_vid_1 = []
+        self.labels = []
         ## add one more loop for each video
-        parent_path = f"Annotations/{self.video_name}"
-        for f in os.listdir(parent_path):
-            frame = cv2.imread(f"{parent_path}/{f}")
-            self.annotations_vid_1.append(frame) # 1080, 1920, 3
+        for video in self.video_names:
+            parent_path = f"Annotations/{video}"
+            print("parent path is", parent_path)
+            for f in os.listdir(parent_path):
+                frame = cv2.imread(f"{parent_path}/{f}")
+                self.annotations_vid_1.append(frame) # 1080, 1920, 3
+                self.labels.append(video)
         
         # Subset for quicker running
-        self.annotations_vid_1 = self.annotations_vid_1[self.init_frame:self.final_frame]
+        if self.init_frame and self.final_frame:
+            self.annotations_vid_1 = self.annotations_vid_1[self.init_frame:self.final_frame]
             
-        self.labels_tensor = []
-        for i in range(len(self.annotations_vid_1)):
-            rgb_mask = self.annotations_vid_1[i] # 1080,1920,3
-            mask_flat = rgb_mask.reshape(-1, 3)
-            colours, inverse = np.unique(mask_flat, axis=0, return_inverse = True)
-            mask_id = inverse.reshape(rgb_mask.shape[:2])
-            mask_id[(mask_flat  == 0).all(axis=1).reshape(rgb_mask.shape[:2])] = 0
+        # self.labels_tensor = []
+        # for i in range(len(self.annotations_vid_1)):
+        #     rgb_mask = self.annotations_vid_1[i] # 1080,1920,3
+        #     mask_flat = rgb_mask.reshape(-1, 3)
+        #     colours, inverse = np.unique(mask_flat, axis=0, return_inverse = True)
+        #     mask_id = inverse.reshape(rgb_mask.shape[:2])
+        #     mask_id[(mask_flat  == 0).all(axis=1).reshape(rgb_mask.shape[:2])] = 0
             
-            boxes, labels = masks_to_boxes(mask_id) # h,w
-            self.labels_tensor.append(boxes)
+        #     boxes, labels = masks_to_boxes(mask_id) # h,w
+        #     self.labels_tensor.append(boxes)
        
     def __len__(self):
         return len(self.annotations_vid_1)
@@ -67,7 +73,8 @@ class VODDataset(Dataset):
         #b = self.labels_tensor[idx]
         #boxes = torch.FloatTensor(b) if len(b) == 1 else torch.FloatTensor(b[0])
 
-        label = class_labels[self.video_name]
+        video_label = self.labels[idx]
+        label = class_labels[video_label]
         
         labels = torch.tensor(label, dtype=torch.long) #"0_squeeze_cloth"
         
