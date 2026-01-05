@@ -41,13 +41,19 @@ class VODDataset(Dataset):
         self.annotations_vid_1 = []
         self.labels = []
         ## add one more loop for each video
+        print("reading all files and storing frames")
+        i = 0
         for video in self.video_names:
             parent_path = f"Annotations/{video}"
-            print("parent path is", parent_path)
+            # print("parent path is", parent_path)
             for f in os.listdir(parent_path):
                 frame = cv2.imread(f"{parent_path}/{f}")
                 self.annotations_vid_1.append(frame) # 1080, 1920, 3
                 self.labels.append(video)
+            i = i+1
+            print("numbers of videos done is", i)
+                
+        print("frame stored")
         
         # Subset for quicker running
         if self.init_frame and self.final_frame:

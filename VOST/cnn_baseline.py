@@ -3,7 +3,7 @@ import torch
 from torchvision import transforms, models
 
 class CNN_Network(torch.nn.Module):
-    def __init__(self, num_classes = 5, *args, **kwargs):
+    def __init__(self, num_classes = 30, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # for param in self.backbone.parameters():
@@ -13,7 +13,7 @@ class CNN_Network(torch.nn.Module):
             nn.Linear(2048, 256),
             nn.Hardswish(), # we can change ReLU here too? but MobileNet uses hardwish internally
             nn.Dropout(0.2),
-            nn.Linear(256, num_classes),
+            nn.Linear(256, 30),
         )
         
     def forward(self, x):

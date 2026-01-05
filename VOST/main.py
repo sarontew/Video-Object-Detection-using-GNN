@@ -1,4 +1,5 @@
 import os
+import cv2
 import time
 import torch
 import numpy as np
@@ -16,13 +17,13 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 def save_features(data_loader, filename):
     all_features = []
     all_labels = []
+    model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+    model.fc = nn.Identity()
+    model.eval()
     for i, l in data_loader:
         image = i.to(device)
         #print(image.shape) # is actually ([1, 3, 1080, 1920]
-        model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         #features = models.resnet50(image, weights=models.ResNet50_Weights.IMAGENET1K_V2) # batch, 2048
-        model.fc = nn.Identity()
-        model.eval()
         with torch.no_grad():
             features = model(image)
             all_features.append(features.cpu())
@@ -76,18 +77,18 @@ def test(model, test_loader, lossfn):
 
 if __name__ == '__main__':
     
-    ## NEXT: multiple videossss
-    # train_files =  [] # 572
+    train_files =  [] # 572
 
-    # with open('ImageSets/train.txt', 'r') as fh:
-    #     for line in fh:
-    #         file = line.replace('\n', '')  
-    #         train_files.append((file)) 
-    
-    
-    train_dataset = VODDataset(video_names=["0_squeeze_cloth", "7_squeeze_pasta"])
-    test_dataset = VODDataset(video_names=["0_squeeze_cloth", "7_squeeze_pasta"], frames=(5,10))
-    train_loader = DataLoader(train_dataset, shuffle=True)
+    with open('ImageSets/train.txt', 'r') as fh:
+        for line in fh:
+            file = line.replace('\n', '')  
+            train_files.append((file))
+                
+    # 70, 30 split
+    ## can only do 30 videos at a time
+    train_dataset = VODDataset(video_names=train_files[0:15])
+    test_dataset = VODDataset(video_names=train_files[15:30])
+    #train_loader = DataLoader(train_dataset, shuffle=True)
     test_loader = DataLoader(test_dataset, shuffle=False)
     train_feature_file_name = "resnet50_train_features.pt"
     test_feature_file_name =  "resnest50_test_features.pt"
@@ -95,14 +96,14 @@ if __name__ == '__main__':
     saving_time_start = time.time()
     if True:
         print("saving features") # when single vid 30 secs, now multiple 600 secs?!
-        save_features(train_loader, train_feature_file_name)
+        #save_features(train_loader, train_feature_file_name)
         save_features(test_loader, test_feature_file_name)
         print("saved")
     
     saving_time_end = time.time()
     print(f"Time taken to save train and test features is {saving_time_end-saving_time_start}")
         
-    # Loading
+    #After features are saved, load and train + test data
     data = torch.load(train_feature_file_name)
     features = data["features"]
     labels = data["labels"]
@@ -121,7 +122,7 @@ if __name__ == '__main__':
     new_test_loader = DataLoader(new_test_dataset, shuffle=True)
     
     #model = FasterRCNN(backbone=backbone, num_classes=1).to(device)
-    model = CNN_Network(num_classes=3).to(device)
+    model = CNN_Network(num_classes=30).to(device)
     lossfn = nn.CrossEntropyLoss()
     optimiser = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
