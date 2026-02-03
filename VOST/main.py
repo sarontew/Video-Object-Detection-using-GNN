@@ -45,7 +45,6 @@ def save_features(data_loader, filename):
         aggregated_video_features.append(torch.from_numpy(averaged_features))
         aggregated_video_labels.append(torch.tensor([label]))
         
-
     torch.save({
         "features": torch.cat(aggregated_video_features), # number of vids x 2048
         "labels": torch.cat(aggregated_video_labels)
@@ -59,6 +58,7 @@ def train(train_loader, model, optimiser, lossfn):
         images = img.to(device) # Video feature input with dim 1x2028
         optimiser.zero_grad()
         pred = model(images)
+        # predicted_class = torch.argmax(pred, dim=1)
         loss = lossfn(pred, target)
         loss.backward()
         optimiser.step()
@@ -94,24 +94,30 @@ if __name__ == '__main__':
     args = parser.parse_args()
     extract_features = bool(args.ExtractFeatures)
     
-    train_files =  [] # 572
-
+    train_files =  []
     # Loading video names from train.txt
     with open('ImageSets/train.txt', 'r') as fh:
         for line in fh:
             file = line.replace('\n', '')
             train_files.append((file))
 
-    number_of_classes = 1        
+    # test_files =  []
+    # # Loading video names from test.txt
+    # with open('ImageSets/test.txt', 'r') as fh:
+    #     for line in fh:
+    #         file = line.replace('\n', '')
+    #         test_files.append((file))
+
+    number_of_classes = 4     
     train_feature_file_name = f"{number_of_classes}_resnet50_train_features.pt" # 30_ for 30 videos
     test_feature_file_name =  f"{number_of_classes}_resnest50_test_features.pt"
     training_frame_range = (0,5)
-    testing_frame_range = (5,15)
+    testing_frame_range = (5,10)
 
     if extract_features:
         saving_time_start = time.time()
-        train_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=training_frame_range)
-        test_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=testing_frame_range)
+        train_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=training_frame_range, split="train")
+        test_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=testing_frame_range, split="test")
         train_loader = DataLoader(train_dataset, shuffle=True)
         test_loader = DataLoader(test_dataset, shuffle=False)
         save_features(train_loader, train_feature_file_name)
@@ -122,15 +128,17 @@ if __name__ == '__main__':
     #After features are saved, load and train + test data
     train_video_features = torch.load(train_feature_file_name)
     features = train_video_features["features"]
+    print("features shape", features.shape)
     labels = train_video_features["labels"]
+    print("labels shape", labels.shape)
     new_train_dataset = TensorDataset(features, labels)
-    new_train_loader = DataLoader(new_train_dataset, batch_size=16, shuffle=True)
+    new_train_loader = DataLoader(new_train_dataset, batch_size=32, shuffle=True)
     
     test_video_features = torch.load(test_feature_file_name)
-    features = test_video_features["features"]
-    labels = test_video_features["labels"]
+    features = test_video_features["features"] # 9,2048
+    labels = test_video_features["labels"] # 9,10
     new_test_dataset = TensorDataset(features, labels)
-    new_test_loader = DataLoader(new_test_dataset, batch_size=32, shuffle=False)
+    new_test_loader = DataLoader(new_test_dataset, batch_size=16, shuffle=False)
     
     model = CNN_Classifier(num_classes=number_of_classes).to(device)
     lossfn = nn.CrossEntropyLoss()
