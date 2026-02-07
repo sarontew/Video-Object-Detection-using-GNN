@@ -13,11 +13,12 @@ from torchvision.models.feature_extraction import get_graph_node_names
 from dataset import VODDataset
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from cnn_baseline import CNN_Classifier
+from utils import get_file_names
 from torchvision import transforms, models
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-def save_features(data_loader, filename):
+def save_features(data_loader, filename, aggregate=False):
     """ 
         Input: 
             data_loader : frames from videos
@@ -28,26 +29,34 @@ def save_features(data_loader, filename):
     model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
     model.fc = nn.Identity()
     model.eval()
+    final_labels = []
+    final_features = []
     video_to_frame_features = {}
     for i, l in data_loader:
         if l.item() not in video_to_frame_features.keys():
             video_to_frame_features[l.item()] = []
         image = i.to(device)
         with torch.no_grad():
-            features = model(image)
-            video_to_frame_features[l.item()].append(features.cpu())
+            extracted_features = model(image)
+            video_to_frame_features[l.item()].append(extracted_features.cpu())
+            final_labels.append(l)
+            final_features.append(extracted_features.cpu())
 
-    aggregated_video_features = []
-    aggregated_video_labels=[]
-    
-    for label, frames in video_to_frame_features.items():
-        averaged_features = np.mean(frames, axis=0) # aggregated frame features
-        aggregated_video_features.append(torch.from_numpy(averaged_features))
-        aggregated_video_labels.append(torch.tensor([label]))
+    if aggregate:
+        aggregated_video_features = []
+        aggregated_video_labels=[]
+        
+        for label, frames in video_to_frame_features.items():
+            averaged_features = np.mean(frames, axis=0) # aggregated frame features
+            aggregated_video_features.append(torch.from_numpy(averaged_features))
+            aggregated_video_labels.append(torch.tensor([label]))
+        
+        final_labels = aggregated_video_labels
+        final_features = aggregated_video_features
         
     torch.save({
-        "features": torch.cat(aggregated_video_features), # number of vids x 2048
-        "labels": torch.cat(aggregated_video_labels)
+        "features": torch.cat(final_features), # number of vids x 2048
+        "labels": torch.cat(final_labels)
     }, filename)
     
 
@@ -94,43 +103,34 @@ if __name__ == '__main__':
     args = parser.parse_args()
     extract_features = bool(args.ExtractFeatures)
     
-    train_files =  []
-    # Loading video names from train.txt
-    with open('ImageSets/train.txt', 'r') as fh:
-        for line in fh:
-            file = line.replace('\n', '')
-            train_files.append((file))
+    train_files =  get_file_names('train.txt')
+    test_files = get_file_names('test.txt')
+    val_files = get_file_names('val.txt')
 
-    # test_files =  []
-    # # Loading video names from test.txt
-    # with open('ImageSets/test.txt', 'r') as fh:
-    #     for line in fh:
-    #         file = line.replace('\n', '')
-    #         test_files.append((file))
-
-    number_of_classes = 4     
-    train_feature_file_name = f"{number_of_classes}_resnet50_train_features.pt" # 30_ for 30 videos
-    test_feature_file_name =  f"{number_of_classes}_resnest50_test_features.pt"
+    training_data_size = 2
+    testing_data_size =  2
+    train_feature_file_name = f"{training_data_size}_resnet50_train_features.pt" # 30_ for 30 videos
+    test_feature_file_name =  f"{testing_data_size}_resnest50_test_features.pt"
     training_frame_range = (0,5)
-    testing_frame_range = (5,10)
+    testing_frame_range = (5,8)
 
     if extract_features:
         saving_time_start = time.time()
-        train_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=training_frame_range, split="train")
-        test_dataset = VODDataset(video_names=train_files[0:number_of_classes], frames=testing_frame_range, split="test")
+        train_dataset = VODDataset(video_names=train_files[0:testing_data_size], split="train", frames=training_frame_range)
+        test_dataset = VODDataset(video_names=train_files[testing_data_size:testing_data_size+training_data_size], split="test", frames=testing_frame_range)
         train_loader = DataLoader(train_dataset, shuffle=True)
         test_loader = DataLoader(test_dataset, shuffle=False)
-        save_features(train_loader, train_feature_file_name)
-        save_features(test_loader, test_feature_file_name)
+        save_features(train_loader, train_feature_file_name, aggregate=True)
+        save_features(test_loader, test_feature_file_name, aggregate=True)
         saving_time_end = time.time()
         print(f"Time taken to save train and test features is {saving_time_end-saving_time_start}")
         
     #After features are saved, load and train + test data
     train_video_features = torch.load(train_feature_file_name)
     features = train_video_features["features"]
-    print("features shape", features.shape)
+    # print("features shape", features.shape)
     labels = train_video_features["labels"]
-    print("labels shape", labels.shape)
+    # print("labels shape", labels.shape)
     new_train_dataset = TensorDataset(features, labels)
     new_train_loader = DataLoader(new_train_dataset, batch_size=32, shuffle=True)
     
@@ -140,7 +140,7 @@ if __name__ == '__main__':
     new_test_dataset = TensorDataset(features, labels)
     new_test_loader = DataLoader(new_test_dataset, batch_size=16, shuffle=False)
     
-    model = CNN_Classifier(num_classes=number_of_classes).to(device)
+    model = CNN_Classifier(num_classes=training_data_size+testing_data_size).to(device) # TODO: fix num_classes, get unique object/action labels based on videos
     lossfn = nn.CrossEntropyLoss()
     optimiser = torch.optim.AdamW(model.parameters(), lr=1e-4)
 

@@ -7,6 +7,12 @@ import cv2
 
 class VODDataset(Dataset):
     def __init__(self, video_names, frames= (None,None), task='object_rec', split='train'):
+        """
+        :param video_names: Video names to extract frames from
+        :param frames: Range of frames to read
+        :param task: 'object_rec' by default otherwise 'action_rec'
+        :param split: train, test or val
+        """
         super().__init__()
         self.video_names = video_names
         self.init_frame = frames[0]
@@ -14,9 +20,32 @@ class VODDataset(Dataset):
         self.frames = []
         self.original_label = []
         self.unique_label_mappings = {}
+        self.split = split
         
         for video in self.video_names:
             parent_path = f"JPEGImages/{video}"
+            all_frames = []
+            for name in os.listdir(parent_path):
+                all_frames.append(name)
+
+            if self.init_frame==None or self.final_frame==None:
+                # First half train, second half test
+                if self.split == 'train':
+                    self.init_frame = 0
+                    self.final_frame = len(all_frames) // 2
+                elif self.split == 'test':
+                    self.init_frame = len(all_frames) // 2 + 1
+                    self.final_frame = len(all_frames) -1
+
+                # Second half training, first half testing
+                # if self.split == 'train':
+                #     self.init_frame = len(all_frames) // 2 + 1
+                #     self.final_frame = len(all_frames) -1
+                # elif self.split == 'test':
+                #     self.init_frame = 0
+                #     self.final_frame = len(all_frames) // 2
+
+                # Todo: First half training, both first half and second half testing (and vice versa)
 
             frame_count = 0
             for f in os.listdir(parent_path):
@@ -28,8 +57,10 @@ class VODDataset(Dataset):
 
                         if task == 'object_rec':
                             target_name = video.split("_")[2] # object
-                        else:
+                        elif task == 'action_rec':
                             target_name = video.split("_")[1] # action
+                        else:
+                            raise Exception("Valid task for object or action recognition not provided")
                         
                         self.original_label.append(target_name)
                         if target_name not in self.unique_label_mappings.keys(): # Ensure unique id for each object
