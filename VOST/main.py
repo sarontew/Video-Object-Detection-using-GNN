@@ -13,7 +13,7 @@ from torchvision.models.feature_extraction import get_graph_node_names
 from dataset import VODDataset
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from cnn_baseline import CNN_Classifier
-from utils import get_file_names
+from utils import get_file_names, get_unique_labels
 from torchvision import transforms, models
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -107,17 +107,25 @@ if __name__ == '__main__':
     test_files = get_file_names('test.txt')
     val_files = get_file_names('val.txt')
 
-    training_data_size = 2
+    training_data_size = 3
     testing_data_size =  2
+    validation_data_size = 3
     train_feature_file_name = f"{training_data_size}_resnet50_train_features.pt" # 30_ for 30 videos
     test_feature_file_name =  f"{testing_data_size}_resnest50_test_features.pt"
     training_frame_range = (0,5)
     testing_frame_range = (5,8)
 
+    train_files = train_files[0:training_data_size]
+    val_files = val_files[0:validation_data_size]
+
+    #print("count of total unique labels is", len(get_unique_labels(train_files, val_files)))
+
     if extract_features:
+        print("Extractingg")
         saving_time_start = time.time()
-        train_dataset = VODDataset(video_names=train_files[0:testing_data_size], split="train", frames=training_frame_range)
-        test_dataset = VODDataset(video_names=train_files[testing_data_size:testing_data_size+training_data_size], split="test", frames=testing_frame_range)
+        train_dataset = VODDataset(video_names=train_files, split="train", frames=training_frame_range)
+        test_dataset = VODDataset(video_names=val_files, split="test", frames=testing_frame_range)
+        
         train_loader = DataLoader(train_dataset, shuffle=True)
         test_loader = DataLoader(test_dataset, shuffle=False)
         save_features(train_loader, train_feature_file_name, aggregate=True)
@@ -140,7 +148,7 @@ if __name__ == '__main__':
     new_test_dataset = TensorDataset(features, labels)
     new_test_loader = DataLoader(new_test_dataset, batch_size=16, shuffle=False)
     
-    model = CNN_Classifier(num_classes=training_data_size+testing_data_size).to(device) # TODO: fix num_classes, get unique object/action labels based on videos
+    model = CNN_Classifier(num_classes=len(get_unique_labels(train_files, val_files))).to(device) # TODO: fix num_classes, get unique object/action labels based on videos
     lossfn = nn.CrossEntropyLoss()
     optimiser = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
