@@ -7,58 +7,15 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import defaultdict
-from torchvision.models import resnet50
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.feature_extraction import get_graph_node_names
 from dataset import VODDataset
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from cnn_baseline import CNN_Classifier
-from utils import get_file_names, get_unique_labels
-from torchvision import transforms, models
+from utils import get_file_names, get_unique_labels, save_features
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-def save_features(data_loader, filename, aggregate=False):
-    """ 
-        Input: 
-            data_loader : frames from videos
-            filename : feature file name for saving
-    
-        Passes frames through resnet50. Then aggregates frames (mean) and stores the video features alongside the label ID
-    """
-    model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
-    model.fc = nn.Identity()
-    model.eval()
-    final_labels = []
-    final_features = []
-    video_to_frame_features = {}
-    for i, l in data_loader:
-        if l.item() not in video_to_frame_features.keys():
-            video_to_frame_features[l.item()] = []
-        image = i.to(device)
-        with torch.no_grad():
-            extracted_features = model(image)
-            video_to_frame_features[l.item()].append(extracted_features.cpu())
-            final_labels.append(l)
-            final_features.append(extracted_features.cpu())
-
-    if aggregate:
-        aggregated_video_features = []
-        aggregated_video_labels=[]
-        
-        for label, frames in video_to_frame_features.items():
-            averaged_features = np.mean(frames, axis=0) # aggregated frame features
-            aggregated_video_features.append(torch.from_numpy(averaged_features))
-            aggregated_video_labels.append(torch.tensor([label]))
-        
-        final_labels = aggregated_video_labels
-        final_features = aggregated_video_features
-        
-    torch.save({
-        "features": torch.cat(final_features), # number of vids x 2048
-        "labels": torch.cat(final_labels)
-    }, filename)
-    
 
 ## TRAIN
 def train(train_loader, model, optimiser, lossfn):

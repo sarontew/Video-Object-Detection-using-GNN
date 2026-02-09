@@ -2,14 +2,17 @@ import os
 import cv2
 import torch
 import numpy as np
+import torch.nn as nn
 import networkx as nx
 import torch_geometric
 from torch import Tensor
 from scipy import ndimage
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
+from utils import save_region_features
+from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
 from skimage.measure import label, regionprops
 
 # video = "0_squeeze_cloth"
@@ -41,6 +44,7 @@ for image_name in os.listdir(f"JPEGImages/{video}"):
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
         # print("subimage type is", type(subimage))
+        # print("with shape", subimage.shape)
 
         subimages_per_frame[frame_count].append(subimage) # each chunk from each frame
     
@@ -87,19 +91,76 @@ for idx, frame_id in enumerate(frame_ids):
             edges_connecting_to.append(target_node)
 
 # Not all subimages are the same size - pad
-flattened_nodes = [node.reshape(-1) for node in sub_images_as_nodes]
-max_len = max(node.shape[0] for node in flattened_nodes)
-padded_nodes = np.stack([
-    np.pad(node, (0, max_len - node.shape[0]))
-    for node in flattened_nodes
-])
-nodes = torch.tensor(padded_nodes, dtype=torch.float)
+# for x in sub_images_as_nodes:
+#     print("shape of each is", x.shape)
+# original_shapes = [img.shape for img in sub_images_as_nodes]
+# original_lengths = [img.size for img in sub_images_as_nodes]
 
-video_1_graph = Data(x=nodes, edge_index=torch.tensor([edges_connecting_from, edges_connecting_to], dtype=torch.long))
-g = torch_geometric.utils.to_networkx(video_1_graph, to_undirected=True)
-plt.figure()
-nx.draw(g)
-plt.show()
+# flattened_nodes = [node.reshape(-1) for node in sub_images_as_nodes]
+# # for x in flattened_nodes:
+# #     print("after flattening shape of each is", x.shape)
+# max_len = max(node.shape[0] for node in flattened_nodes)
+# print("max len is", max_len)
+# padded_nodes = np.stack([
+#     np.pad(node, (0, max_len - node.shape[0]))
+#     for node in flattened_nodes
+# ])
+# for x in padded_nodes:
+#     print("after padding", x.shape)
+# nodes = torch.tensor(padded_nodes, dtype=torch.float)
+
+# restored_images = []
+# for i, (shape, length) in enumerate(zip(original_shapes, original_lengths)):
+#     unpadded = nodes[i, :length]
+#     restored = unpadded.reshape(shape)   # (H, W, C)
+#     restored_images.append(restored)
+#     print(restored.shape)
+
+# assume sub_images_as_nodes is a list of (H, W, C) arrays
+
+Hs = [img.shape[0] for img in sub_images_as_nodes]
+Ws = [img.shape[1] for img in sub_images_as_nodes]
+C  = sub_images_as_nodes[0].shape[2]
+
+max_H = max(Hs)
+max_W = max(Ws)
+
+padded_images = []
+
+for img in sub_images_as_nodes:
+    assert img.ndim == 3, img.shape  # (H, W, C)
+    H, W, C = img.shape
+    # print("shape")
+    # print(H,W,C)
+
+    # cv2.imshow("subimage", img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+
+    pad_h = max_H - H
+    pad_w = max_W - W
+
+    # pad format: ((top,bottom), (left,right), (channels))
+    padded = np.pad(
+        img,
+        pad_width=((0, pad_h), (0, pad_w), (0, 0)),
+        mode="constant",  # or "edge", "reflect", etc.
+        constant_values=0
+    )
+    # print("padded shape", padded.shape)
+    # cv2.imshow("subimage", padded)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    assert padded.shape == (max_H, max_W, C)
+    padded_images.append(padded)
+
+batch = torch.from_numpy(np.stack(padded_images))
+
+video_1_graph = Data(x=batch, edge_index=torch.tensor([edges_connecting_from, edges_connecting_to], dtype=torch.long))
+# g = torch_geometric.utils.to_networkx(video_1_graph, to_undirected=True)
+# plt.figure()
+# nx.draw(g)
+# plt.show()
 
 # x: node feature matrix with shape [num_nodes, num_node_features]
 # edge_index: graph connectivity in COO format with shape [2, num_edges]
@@ -114,16 +175,59 @@ video_1_graph.validate(raise_on_error=True)
 # print(data.has_self_loops())
 # print(data.has_isolated_nodes())
 
-class MyGCN(torch.nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.conv1 = GCNConv(2,4) # input feature per node = 2, output feature per node =4
+class St_GCN_Classifier(torch.nn.Module):
+    def __init__(self, num_classes = 10):
+        super().__init__()
 
-    def forward(self,data):
-        x, edge_index = data.x, data.edge_index
+        self.hidden_channels = 64
+        self.conv1 = GCNConv(2048,self.hidden_channels) # input feature per node = 2, output feature per node =4
+        self.conv2 = GCNConv(self.hidden_channels, self.hidden_channels)
+        self.classifier = nn.Linear(self.hidden_channels, num_classes)
+
+    def forward(self,x, edge_index, batch):
+
+        # Node level message passing
         x = self.conv1(x, edge_index)
-        return F.relu(x)
-    
+        x = F.relu(x)
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        # Graph level pooling
+        x = global_mean_pool(x, batch)
+        x = self.classifier(x)
+        return x
+
+
+dataset = [video_1_graph]
+train_loader = DataLoader(dataset, batch_size=64, shuffle = True)
+
+# trying to extract the features of each node
+save_region_features(train_loader)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model = St_GCN_Classifier(num_classes=2).to(device)
+optimiser = torch.optim.Adam(model.parameters(), lr=0.001)
+criterion = torch.nn.CrossEntropyLoss()
+
+model.train()
+for epoch in range(50):
+    total_loss = 0
+
+    for batch in train_loader:
+        batch = batch.to(device)
+
+        optimiser.zero_grad()
+        output = model(batch.x, batch.edge_index, batch.batch)
+        loss = criterion(output, batch.y)
+        loss.backwards()
+        optimiser.step()
+
+        total_loss += loss.item()
+
+    print(f"Epoch {epoch:03d}, Loss: {total_loss:.4f}")
+
+
 # model = MyGCN()
 # out = model(video_1_graph)
 # print("Output ndoe features after GN layer is", out)
