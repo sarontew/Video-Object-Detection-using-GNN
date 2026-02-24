@@ -67,8 +67,8 @@ if __name__ == '__main__':
     training_data_size = 3
     testing_data_size =  2
     validation_data_size = 3
-    train_feature_file_name = f"{training_data_size}_resnet50_train_features.pt" # 30_ for 30 videos
-    test_feature_file_name =  f"{testing_data_size}_resnest50_test_features.pt"
+    train_feature_file_name = f"resnet50_train_features.pt" # 30_ for 30 videos
+    test_feature_file_name =  f"resnest50_test_features.pt"
     training_frame_range = (0,5)
     testing_frame_range = (5,8)
 
@@ -85,23 +85,36 @@ if __name__ == '__main__':
         
         train_loader = DataLoader(train_dataset, shuffle=True)
         test_loader = DataLoader(test_dataset, shuffle=False)
-        save_features(train_loader, train_feature_file_name, aggregate=True)
-        save_features(test_loader, test_feature_file_name, aggregate=True)
+
+        save_features(train_loader, train_feature_file_name, train=True, aggregate=False)
+        save_features(test_loader, test_feature_file_name, train=False, aggregate=False)
         saving_time_end = time.time()
         print(f"Time taken to save train and test features is {saving_time_end-saving_time_start}")
         
-    #After features are saved, load and train + test data
-    train_video_features = torch.load(train_feature_file_name)
-    features = train_video_features["features"]
-    # print("features shape", features.shape)
-    labels = train_video_features["labels"]
-    # print("labels shape", labels.shape)
+    all_train_features = []
+    all_train_labels = []
+
+    for train_feats_file_name in os.listdir("Resnet50_Features/train"):
+        train_frame = torch.load(f"Resnet50_Features/train/{train_feats_file_name}")
+        all_train_features.append(train_frame['features'])
+        all_train_labels.append(torch.tensor(train_frame['labels']))
+
+    features = torch.cat(all_train_features, dim=0)
+    labels = torch.stack(all_train_labels)
     new_train_dataset = TensorDataset(features, labels)
-    new_train_loader = DataLoader(new_train_dataset, batch_size=32, shuffle=True)
-    
-    test_video_features = torch.load(test_feature_file_name)
-    features = test_video_features["features"] # 9,2048
-    labels = test_video_features["labels"] # 9,10
+    new_train_loader = DataLoader(new_train_dataset, batch_size=2, shuffle=True)
+
+    all_test_features = []
+    all_test_labels = []
+
+    for test_feats_file_name in os.listdir("Resnet50_Features/test"):
+        test_frame = torch.load(f"Resnet50_Features/test/{test_feats_file_name}")
+        all_test_features.append(test_frame['features'])
+        all_test_labels.append(torch.tensor(test_frame['labels']))
+
+    features = torch.cat(all_test_features, dim=0)
+    labels = torch.stack(all_test_labels)
+
     new_test_dataset = TensorDataset(features, labels)
     new_test_loader = DataLoader(new_test_dataset, batch_size=16, shuffle=False)
     

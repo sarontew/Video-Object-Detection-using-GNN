@@ -7,8 +7,6 @@ from torchvision.models import resnet50
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-  
-
 def get_file_names(filename):
     files =  []
     with open(f'ImageSets/{filename}', 'r') as fh:
@@ -43,7 +41,7 @@ def get_unique_labels(train_files, test_files, task="object_rec"):
     return list(set(total_labels))
 
 
-def save_features(data_loader, filename, aggregate=False):
+def save_features(data_loader, filename, train=True, aggregate=False):
     """ 
         Input: 
             data_loader : frames from videos
@@ -56,7 +54,8 @@ def save_features(data_loader, filename, aggregate=False):
     model.eval()
     final_labels = []
     final_features = []
-    video_to_frame_features = {}
+    video_to_frame_features = {} # video_label : [frame_feat1, frame_feat2]
+    subfolder = 'train' if train else 'test'
     for i, l in data_loader:
         if l.item() not in video_to_frame_features.keys():
             video_to_frame_features[l.item()] = []
@@ -66,6 +65,17 @@ def save_features(data_loader, filename, aggregate=False):
             video_to_frame_features[l.item()].append(extracted_features.cpu())
             final_labels.append(l)
             final_features.append(extracted_features.cpu())
+
+    for k in video_to_frame_features.keys():
+        print(len(video_to_frame_features[k]))
+        for f in range(len(video_to_frame_features[k])):
+            torch.save({
+                "features": video_to_frame_features[k][f].cpu(), # number of vids x 2048
+                "labels": k
+            }, f"Resnet50_Features/{subfolder}/video{k}_frame_{f}_{filename}")
+
+            # E.g. Resnet50_Features/train/video0_frame_4_resnet50_train_features.pt
+
 
     if aggregate:
         aggregated_video_features = []
@@ -79,10 +89,10 @@ def save_features(data_loader, filename, aggregate=False):
         final_labels = aggregated_video_labels
         final_features = aggregated_video_features
         
-    torch.save({
-        "features": torch.cat(final_features), # number of vids x 2048
-        "labels": torch.cat(final_labels)
-    }, filename)
+        torch.save({
+            "features": torch.cat(final_features), # number of vids x 2048
+            "labels": torch.cat(final_labels)
+        }, filename)
 
 # def save_region_features(subimage, filename, data_loader):
 def save_region_features(data_loader, filename="7_squeeze_pasta_graph_features.pt"):
