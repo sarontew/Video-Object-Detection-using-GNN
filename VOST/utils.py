@@ -108,20 +108,20 @@ def save_region_features(data_loader, filename="7_squeeze_pasta_graph_features.p
         batch = batch.to(device)
         for node in batch.x:
             node = node.to(device)
-            with torch.no_grad():
-                node_features = model(node)
-            feature_nodes.append(node_features)
-        edge_index = batch.edge_index
-        features_batch = np.stack(node_features)
-            # print(node.numpy().shape)
-            # cv2.imshow("subimage", node.numpy())
-            # cv2.waitKey(0)
-            # cv2.destroyAllWindows()
+            #print(node.numpy().shape)
+            cv2.imshow("subimage", node.numpy())
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        #     with torch.no_grad():
+        #         node_features = model(node)
+        #     feature_nodes.append(node_features)
+        # edge_index = batch.edge_index
+        # features_batch = np.stack(node_features)
     
-    print("node features shape", torch.cat(feature_nodes).shape)
+    # print("node features shape", torch.cat(feature_nodes).shape)
 
-    torch.save({
-        "x": torch.cat(feature_nodes), # number of vids x 2048
-        "edge_index": torch.cat(edge_index),
-        "batch": torch.cat(features_batch)
-    }, filename )
+    # torch.save({
+    #     "x": torch.cat(feature_nodes), # number of vids x 2048
+    #     "edge_index": torch.cat(edge_index),
+    #     "batch": torch.cat(features_batch)
+    # }, filename )
