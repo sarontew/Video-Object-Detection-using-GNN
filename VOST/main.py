@@ -2,6 +2,7 @@ import os
 import cv2
 import time
 import torch
+import random
 import argparse
 import numpy as np
 import torch.nn as nn
@@ -12,11 +13,35 @@ from torchvision.models.feature_extraction import get_graph_node_names
 from dataset import VODDataset
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from cnn_baseline import CNN_Classifier
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedGroupKFold
 from utils import get_file_names, get_unique_labels, save_features
+from sklearn.metrics import confusion_matrix, classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
+def save(files, chunck_size, unique_label_mappings, split, file_name ):
+    print("split", split)
+    print("filename", file_name)
+    for i in range(0, len(files), chunck_size):
+        print("Extractingg")
+        ffs = files[i:i+chunck_size]
+        dataset = VODDataset(video_names=ffs, unique_label_mappings= unique_label_mappings, split=split)
+        if len(dataset) == 0:
+            print("empty dataset?")
+        else:
+            loader = DataLoader(
+                dataset,
+                batch_size=64,
+                shuffle=True
+            )
+            train = True if split == "train" else False
+            save_features(loader, file_name, train=train, aggregate=False)
+
+def get_object_label(video_name):
+    parts = video_name.split('.')[0].split('_')
+    return "_".join(parts[2:])
 
 ## TRAIN
 def train(train_loader, model, optimiser, lossfn, fold):
@@ -25,6 +50,7 @@ def train(train_loader, model, optimiser, lossfn, fold):
     running_loss = 0.0
     for img, target in train_loader:
         images = img.to(device) # Video feature input with dim 1x2028
+        target = target.to(device)
         optimiser.zero_grad()
         pred = model(images)
         loss = lossfn(pred, target)
@@ -43,6 +69,8 @@ def test(model, test_loader, lossfn, device):
     test_loss = 0
     correct_frames = 0  # frame-level accuracy
     video_probs_dict = {}  # accumulate frame probs per video
+    all_preds = []
+    all_targets = []
 
     with torch.no_grad():
         for img, target in test_loader:
@@ -50,7 +78,16 @@ def test(model, test_loader, lossfn, device):
             target = target.to(device)
             
             pred = model(img)  # (batch_size, num_classes)
+            # print("pred argmax", pred.argmax(1))
+            # print("target", target)
             test_loss += lossfn(pred, target).item()
+
+            # predicted class
+            _, predicted = torch.max(pred, 1)
+
+            # for confusion matrix
+            all_preds.extend(predicted.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
             
             # frame-level accuracy
             correct_frames += (pred.argmax(1) == target).type(torch.float).sum().item()
@@ -64,6 +101,46 @@ def test(model, test_loader, lossfn, device):
                 if vid not in video_probs_dict:
                     video_probs_dict[vid] = []
                 video_probs_dict[vid].append(probs[i].cpu())
+
+    cm = confusion_matrix(all_targets, all_preds)
+    print("Confusion Matrix:")
+    print(cm)
+
+    per_class_acc = cm.diagonal() / cm.sum(axis=1)
+
+    print("\nPer-class accuracy:")
+    for i, acc in enumerate(per_class_acc):
+        print(f"Class {i}: {acc*100:.2f}%")
+
+    cm_norm = cm.astype("float") / cm.sum(axis=1)[:, None]
+
+    plt.figure(figsize=(6,5))
+    sns.heatmap(cm_norm, fmt="d", cmap="Blues")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.title("Normalised Confusion Matrix")
+    plt.show()
+
+    plt.savefig("confusion_matrix.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+
+    plt.figure(figsize=(6,5))
+    class_names = list(unique_label_mappings.keys())
+    sns.heatmap(cm_norm, fmt="d",
+            xticklabels=class_names,
+            yticklabels=class_names,
+            cmap="Blues")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.title("Normalised Confusion Matrix with class names")
+    plt.show()
+
+    plt.savefig("confusion_matrix_with_labels.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+    print("\nClassification Report:")
+    print(classification_report(all_targets, all_preds))
 
     # compute video-level predictions
     correct_videos = 0
@@ -81,9 +158,14 @@ def test(model, test_loader, lossfn, device):
 
     print(f"Frame Accuracy: {100*frame_acc:.1f}%, Video Accuracy: {100*video_acc:.1f}%, Loss: {test_loss:.6f}")
 
+# def extract_label_from_filename(filename):
+#     # Split by underscore, take last part before extension
+#     return filename.split('_')[-1].split('.')[0]  # 'cloth' in your example
+
 def extract_label_from_filename(filename):
-    # Split by underscore, take last part before extension
-    return filename.split('_')[-1].split('.')[0]  # 'cloth' in your example
+    name = filename.split('.')[0]        # remove extension if present
+    parts = name.split('_')
+    return "_".join(parts[2:])           # join everything after action
 
 if __name__ == '__main__':
 
@@ -94,11 +176,40 @@ if __name__ == '__main__':
     extract_features = bool(args.ExtractFeatures)
 
     all_valid_file_names = get_file_names('train.txt') + get_file_names('val.txt')
-    all_valid_file_names = all_valid_file_names[0:20]
+    #all_valid_file_names = all_valid_file_names[0:10]
 
-    training_data_size = int(0.8 * len(all_valid_file_names))
-    train_files = all_valid_file_names[0:training_data_size]
-    test_files = all_valid_file_names[training_data_size:]
+    #all_valid_file_names = ['4176_cut_cloth', '4174_cut_cloth', '4331_cut_cloth', '4320_tear_dough', '226_squeeze_dough', '2218_empty_raisin', '455_fold_box']
+
+    class_to_files = defaultdict(list)
+
+    for file in all_valid_file_names:
+        label = get_object_label(file)
+        class_to_files[label].append(file)
+    
+    all_classes = list(class_to_files.keys())
+    random.shuffle(all_classes)
+    overlap_fraction = 1 # was 0.18
+    num_overlap_classes = max(1, int(len(all_classes) * overlap_fraction))
+    overlap_classes = set(all_classes[:num_overlap_classes])
+    print("overlap classes are", overlap_classes)
+    train_files = []
+    test_files = []
+    for cls, files in class_to_files.items():
+        random.shuffle(files)
+        if cls in overlap_classes:
+            split_idx = int(0.8 * len(files))
+            train_files.extend(files[:split_idx])
+            test_files.extend(files[split_idx:])
+        else:
+            # Assign whole class to train (or randomly choose)
+            train_files.extend(files)
+
+    # training_data_size = int(0.8 * len(all_valid_file_names))
+    # train_files = all_valid_file_names[0:training_data_size]
+    # test_files = all_valid_file_names[training_data_size:]
+
+    # print("train files", train_files)
+    # print("test files", test_files)
 
     train_feature_file_name = f"resnet50_train_features.pt" # 30_ for 30 videos
     test_feature_file_name =  f"resnest50_test_features.pt"
@@ -109,37 +220,39 @@ if __name__ == '__main__':
 
     # Extract all unique object names
     all_labels = sorted({extract_label_from_filename(f) for f in all_files})
+    #print("all labels", all_labels)
 
     # Create consistent label → ID mapping
     unique_label_mappings = {label: idx for idx, label in enumerate(all_labels)}
     num_classes = len(unique_label_mappings)
-    print("Classes:", unique_label_mappings)
-    print("Total classes:", num_classes)
 
     if extract_features:
-        print("Extractingg")
-        saving_time_start = time.time()
-        train_dataset = VODDataset(video_names=train_files, unique_label_mappings= unique_label_mappings, split="train")
-        test_dataset = VODDataset(video_names=test_files, unique_label_mappings= unique_label_mappings, split="test")
-        
-        train_loader = DataLoader(train_dataset, shuffle=True)
-        test_loader = DataLoader(test_dataset, shuffle=False)
+        save(train_files, 50, unique_label_mappings, 'train', train_feature_file_name )
+        save(test_files, 50, unique_label_mappings, 'test', test_feature_file_name )
 
-        save_features(train_loader, train_feature_file_name, train=True, aggregate=False)
-        save_features(test_loader, test_feature_file_name, train=False, aggregate=False)
-        saving_time_end = time.time()
-        print(f"Time taken to save train and test features is {saving_time_end-saving_time_start}")
-        
+    ## organise feats after saving
+      
     all_train_features = []
     all_train_labels = []
+    grouping_video_ids = []
 
     for train_feats_file_name in os.listdir("Resnet50_Features/train"):
         train_frame = torch.load(f"Resnet50_Features/train/{train_feats_file_name}")
-        all_train_features.append(train_frame['features'])
+        feat = train_frame['features'].unsqueeze(0)  # shape becomes [1, 2048]
+        # print("feat shape", feat.shape)
+        all_train_features.append(feat)
         all_train_labels.append(torch.tensor(train_frame['labels']))
- 
+        video_id = train_feats_file_name
+        # video_id = train_feats_file_name[5]  # adjust if needed
+        grouping_video_ids.append(video_id)
+
     features = torch.cat(all_train_features, dim=0)
     labels = torch.stack(all_train_labels)
+
+    # for stratified k fold
+    labels_np = labels.cpu().numpy()
+    groups = np.array(grouping_video_ids)
+
     new_train_dataset = TensorDataset(features, labels)
 
     # KFold validation
@@ -148,10 +261,11 @@ if __name__ == '__main__':
     batch_size = 2
 
     kfold = KFold(n_splits=k_folds, shuffle=True, random_state=42)
+    strkfold  = StratifiedGroupKFold(n_splits=k_folds, shuffle=True, random_state=42)
     best_val_acc = 0
     best_model_state = None
 
-    for fold, (train_ids, val_ids) in enumerate(kfold.split(new_train_dataset)):
+    for fold, (train_ids, val_ids) in enumerate(strkfold.split(features, labels_np, groups)):
         print(f"\n========== Fold {fold+1}/{k_folds} ==========")
 
         # Sample elements randomly from a given list of ids
@@ -171,12 +285,14 @@ if __name__ == '__main__':
             sampler=val_subsampler
         )
 
+        print("num classes for training and validation is", num_classes)
+
         model = CNN_Classifier(
             num_classes=num_classes # does it need test files also as possible classes?
         ).to(device)
 
         optimiser = torch.optim.Adam(model.parameters(), lr=1e-4)
-        lossfn = nn.CrossEntropyLoss()
+        lossfn = nn.CrossEntropyLoss().to(device)
 
         train(train_loader, model, optimiser, lossfn, fold)
 
@@ -205,11 +321,16 @@ if __name__ == '__main__':
 
     for test_feats_file_name in os.listdir("Resnet50_Features/test"):
         test_frame = torch.load(f"Resnet50_Features/test/{test_feats_file_name}")
-        all_test_features.append(test_frame['features'])
+        all_test_features.append(test_frame['features'].unsqueeze(0) )
         all_test_labels.append(torch.tensor(test_frame['labels']))
 
     features = torch.cat(all_test_features, dim=0)
     labels = torch.stack(all_test_labels)
+
+    # print("features dim", features.shape)
+    # print("labels dim", labels.shape)
+    # print("Test labels unique:", torch.unique(labels))
+    # print("Num classes:", num_classes)
 
     new_test_dataset = TensorDataset(features, labels)
     new_test_loader = DataLoader(new_test_dataset, batch_size=16, shuffle=False)

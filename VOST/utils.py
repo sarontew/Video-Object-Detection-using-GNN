@@ -49,25 +49,41 @@ def save_features(data_loader, filename, train=True, aggregate=False):
     
         Passes frames through resnet50. Then aggregates frames (mean) and stores the video features alongside the label ID
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
     model.fc = nn.Identity()
+    model = model.to(device)
     model.eval()
     final_labels = []
     final_features = []
     video_to_frame_features = {} # video_label : [frame_feat1, frame_feat2]
     subfolder = 'train' if train else 'test'
-    for i, l in data_loader:
-        if l.item() not in video_to_frame_features.keys():
-            video_to_frame_features[l.item()] = []
-        image = i.to(device)
-        with torch.no_grad():
-            extracted_features = model(image)
-            video_to_frame_features[l.item()].append(extracted_features.cpu())
-            final_labels.append(l)
-            final_features.append(extracted_features.cpu())
+    for images, labels in data_loader:
+
+        images = images.to(device)
+
+        with torch.inference_mode():
+            features = model(images)
+
+        features = features.cpu()
+
+        for feature, label in zip(features, labels):
+
+            label = label.item()
+
+            if label not in video_to_frame_features:
+                video_to_frame_features[label] = []
+
+            video_to_frame_features[label].append(feature)
+
+            final_labels.append(label)
+            final_features.append(feature)
 
     for k in video_to_frame_features.keys():
-        print(len(video_to_frame_features[k]))
+        # print("saving per video for video with key", k)
+        # print("frames:", len(video_to_frame_features[k])) # length of frames printed
+        print("saving to")
+        print(f"Resnet50_Features/{subfolder}/video{k}")
         for f in range(len(video_to_frame_features[k])):
             torch.save({
                 "features": video_to_frame_features[k][f].cpu(), # number of vids x 2048
