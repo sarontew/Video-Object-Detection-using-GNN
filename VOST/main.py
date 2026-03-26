@@ -52,7 +52,11 @@ def train(train_loader, model, optimiser, lossfn, fold):
         images = img.to(device) # Video feature input with dim 1x2028
         target = target.to(device)
         optimiser.zero_grad()
+        # print("images type is ", type(images))
+        # print("cnn images input dim is", images.shape)
         pred = model(images)
+        # print("pred is", pred)
+        # print("target is", target)
         loss = lossfn(pred, target)
         loss.backward()
         optimiser.step()
@@ -176,9 +180,9 @@ if __name__ == '__main__':
     extract_features = bool(args.ExtractFeatures)
 
     all_valid_file_names = get_file_names('train.txt') + get_file_names('val.txt')
-    #all_valid_file_names = all_valid_file_names[0:10]
+    #all_valid_file_names = all_valid_file_names[0:2]
 
-    #all_valid_file_names = ['4176_cut_cloth', '4174_cut_cloth', '4331_cut_cloth', '4320_tear_dough', '226_squeeze_dough', '2218_empty_raisin', '455_fold_box']
+    all_valid_file_names = ['4176_cut_cloth', '4174_cut_cloth', '4331_cut_cloth', '4320_tear_dough', '226_squeeze_dough', '2218_empty_raisin', '455_fold_box', '1186_cut_chilli', '1184_cut_chilli']
 
     class_to_files = defaultdict(list)
 
@@ -265,6 +269,9 @@ if __name__ == '__main__':
     best_val_acc = 0
     best_model_state = None
 
+    print("in main labels np", labels_np)
+    print("groups", groups)
+
     for fold, (train_ids, val_ids) in enumerate(strkfold.split(features, labels_np, groups)):
         print(f"\n========== Fold {fold+1}/{k_folds} ==========")
 
@@ -350,3 +357,5 @@ if __name__ == '__main__':
     train_time = training_end_time - training_start_time
     test_time = testing_end_time - testing_start_time
     print(f"Train time is {train_time} and test time is {test_time}")
+
+    torch.save(model.state_dict(), 'cnn_baseline_1.0')

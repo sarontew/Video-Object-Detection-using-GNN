@@ -40,6 +40,14 @@ def get_unique_labels(train_files, test_files, task="object_rec"):
     total_labels = _get_one_file(train_files) + _get_one_file(test_files)
     return list(set(total_labels))
 
+def get_object_label(video_name):
+    parts = video_name.split('.')[0].split('_')
+    return "_".join(parts[2:])
+
+def extract_label_from_filename(filename):
+    name = filename.split('.')[0]        # remove extension if present
+    parts = name.split('_')
+    return "_".join(parts[2:])           # join everything after action
 
 def save_features(data_loader, filename, train=True, aggregate=False):
     """ 
