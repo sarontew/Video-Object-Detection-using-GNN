@@ -186,31 +186,61 @@ if __name__ == '__main__':
 
     #all_valid_file_names = ['4176_cut_cloth', '4174_cut_cloth', '4331_cut_cloth', '4320_tear_dough', '226_squeeze_dough', '2218_empty_raisin', '455_fold_box', '1186_cut_chilli', '1184_cut_chilli']
 
+    from collections import defaultdict
+    import random
+
+    MIN_SAMPLES = 3
+    MAX_SAMPLES = 50 
+    TEST_SPLIT = 0.2
+
     class_to_files = defaultdict(list)
 
+    # Build mapping
     for file in all_valid_file_names:
         label = get_object_label(file)
         class_to_files[label].append(file)
-    
-    all_classes = list(class_to_files.keys())
+
+    print("Before filtering:", len(class_to_files), "classes")
+
+    # remove small classes
+    filtered_class_to_files = {}
+    for cls, files in class_to_files.items():
+        if len(files) >= MIN_SAMPLES:
+            filtered_class_to_files[cls] = files
+
+    print("After filtering:", len(filtered_class_to_files), "classes")
+
+    # cap large classes (optional but recommended)
+    for cls, files in filtered_class_to_files.items():
+        random.shuffle(files)
+        if len(files) > MAX_SAMPLES:
+            filtered_class_to_files[cls] = files[:MAX_SAMPLES]
+
+    # Continue with filtered data
+    all_classes = list(filtered_class_to_files.keys())
     random.shuffle(all_classes)
-    overlap_fraction = 1 # was 0.18
+
+    overlap_fraction = 1.0
     num_overlap_classes = max(1, int(len(all_classes) * overlap_fraction))
     overlap_classes = set(all_classes[:num_overlap_classes])
-    print("overlap classes are", overlap_classes)
+
+    print("Overlap classes:", overlap_classes)
+
     train_files = []
     test_files = []
-    for cls, files in class_to_files.items():
+
+    for cls, files in filtered_class_to_files.items():
         random.shuffle(files)
-        if cls in overlap_classes:
-            split_idx = int(0.8 * len(files))
-            train_files.extend(files[:split_idx])
-            test_files.extend(files[split_idx:])
-        else:
-            # Assign whole class to train (or randomly choose)
-            train_files.extend(files)
+
+        split_idx = int((1 - TEST_SPLIT) * len(files))
+        
+        train_files.extend(files[:split_idx])
+        test_files.extend(files[split_idx:])
 
     all_files = train_files + test_files
+
+    print("Train size:", len(train_files))
+    print("Test size:", len(test_files))
 
     # Extract all unique object names
     all_labels = sorted({extract_label_from_filename(f) for f in all_files})
@@ -241,8 +271,9 @@ if __name__ == '__main__':
     labels_np = np.array(labels_list)
     groups = np.array(groups_list)
 
-    print("len dataset:", len(full_dataset))
-    print("len labels:", len(labels_np))
+
+    print("groups:", groups)
+    print("labels:", labels_np)
 
     # labels_list = []
     # groups_list = []
@@ -376,4 +407,4 @@ if __name__ == '__main__':
     test_time = testing_end_time - testing_start_time
     print(f"Train time is {train_time} and test time is {test_time}")
 
-    torch.save(model.state_dict(), 'cnn_baseline_1.0')
+    torch.save(model.state_dict(), 'cnn_baseline_2.0')

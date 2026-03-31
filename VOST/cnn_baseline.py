@@ -48,6 +48,42 @@ class CNN_With_Backbone(torch.nn.Module):
         return self.backbone(x)
 
 
+class FrameClassifierUnifiedCNN(torch.nn.Module):
+    def __init__(self, num_classes = 5, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.backbone = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+
+        self.resnet_earlier_layer = nn.Sequential(*list(self.backbone.children())[:-4])
+
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        for param in self.backbone.layer4.parameters():
+            param.requires_grad = True
+        
+        # for param in self.backbone.parameters():
+        #     param.requires_grad = False
+        in_features = self.backbone.fc.in_features # 2048
+        self.backbone.fc = nn.Sequential(
+            nn.Linear(in_features, 256),
+            nn.Hardswish(),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes)
+        ) 
+        # self.backbone.fc = nn.Sequential(
+        #     nn.Linear(in_features, 512),
+        #     nn.BatchNorm1d(512),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(512, num_classes)
+        # )
+
+    def forward(self, x):
+        feats = self.resnet_earlier_layer(x)
+        print("in new")
+
+        return self.backbone(x), feats
+    
 class FrameClassifier(nn.Module):
     def __init__(self, num_classes, pretrained=True):
         super(FrameClassifier, self).__init__()
